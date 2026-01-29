@@ -1,0 +1,1 @@
+<?php echo "aw-sample ok"; ?>

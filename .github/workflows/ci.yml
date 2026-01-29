@@ -1,0 +1,29 @@
+name: CI
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push
+        run: |
+          docker build -t aw-sample:latest ./app
+          docker tag aw-sample:latest 711387135481.dkr.ecr.us-east-1.amazonaws.com/aw-sample:latest
+          docker push 711387135481.dkr.ecr.us-east-1.amazonaws.com/aw-sample:latest
+
+      - name: Simple test (container serves)
+        run: |
+          docker run -d --name aw -p 8080:80 aw-sample:latest
+          curl -f http://localhost:8080
+          docker rm -f aw
