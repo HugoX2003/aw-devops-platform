@@ -1,0 +1,9 @@
+flowchart LR
+Dev[Developer] --> Git[GitHub]
+Git --> CI["CI (GitHub Actions / Jenkins)"]
+CI --> Infra[Terraform / AWS]
+Infra -->|provisions| AWS[AWS Account]
+AWS --> EKS[EKS]
+AWS --> RDS[Aurora MySQL]
+AWS --> S3[S3 + CloudFront]
+AWS --> OpenSearch[OpenSearch]
