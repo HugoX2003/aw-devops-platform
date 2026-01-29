@@ -24,6 +24,16 @@ jobs:
 
       - name: Simple test (container serves)
         run: |
+          docker rm -f aw || true
           docker run -d --name aw -p 8080:80 aw-sample:latest
-          curl -f http://localhost:8080
+
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080 >/dev/null; then
+              echo "OK"
+              break
+            fi
+            sleep 1
+          done
+          
+          curl -f http://localhost:8080 || (docker logs aw && exit 1)
           docker rm -f aw
