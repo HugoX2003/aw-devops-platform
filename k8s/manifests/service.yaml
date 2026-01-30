@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aw-sample-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: aw-sample
+  ports:
+    - port: 80
+      targetPort: 80
