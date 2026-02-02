@@ -2,6 +2,7 @@
 **/.terraform/
 **/*.tfstate
 **/*.tfstate.*
+plan.tf
 **/*.tfplan
 crash.log
 crash.*.log
