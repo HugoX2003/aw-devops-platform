@@ -1,5 +1,7 @@
 # Terraform
 **/.terraform/
+**/terraform.tfvars
+**/aw-bootcamp-key.pem
 **/*.tfstate
 **/*.tfstate.*
 plan.tf
