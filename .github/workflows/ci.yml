@@ -67,7 +67,7 @@ jobs:
         with:
           args: >-
             -Dsonar.organization=hugox2003
-            -Dsonar.projectKey=hugox2003_aw-devops-platform
+            -Dsonar.projectKey=HugoX2003_aw-devops-platform
             -Dsonar.exclusions=vendor/**,infra/**
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
