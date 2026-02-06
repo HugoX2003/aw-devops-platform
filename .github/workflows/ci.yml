@@ -75,7 +75,7 @@ jobs:
       # Paso 4: Subir DB Password a SSM Parameter Store
       - name: Store DB Password in SSM
         run: |
-          aws ssm put-parameter --name /aw/bootcamp/db/password --value "supersecret" --type SecureString
+          aws ssm put-parameter --name /aw/bootcamp/db/password --value "supersecret" --type SecureString --overwrite
 
       # Paso 5: Recuperar el parámetro DB Password desde SSM
       - name: Retrieve DB password from SSM
