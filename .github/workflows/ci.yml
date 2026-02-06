@@ -26,14 +26,51 @@ jobs:
 
       - name: Sync S3 and Invalidate CloudFront
         run: |
-          # 1. Obtenemos los nombres dinámicos de los outputs
           BUCKET=$(terraform output -raw s3_bucket_name)
           DIST_ID=$(terraform output -raw cloudfront_distribution_id)
-          
-          # 2. Subimos el index.html (está en la raíz del proyecto)
           aws s3 cp ../../index.html s3://$BUCKET/index.html
-          
-          # 3. EL RETO: Invalidación automática después del deploy
-          echo "Iniciando invalidación automática para la distribución: $DIST_ID"
           aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
         working-directory: infra/terraform
+
+  security-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: docker build -t my-app:${{ github.sha }} .
+        working-directory: app
+
+      # Paso 1: Ejecutar Trivy
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.2.0
+        with:
+          image-ref: 'my-app:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      # Paso 2: Ejecutar PHPStan
+      - name: Install PHPStan
+        run: |
+          composer require --dev phpstan/phpstan
+          vendor/bin/phpstan analyse src --level=7
+
+      # Paso 3: Ejecutar SonarQube
+      - name: SonarQube Scan
+        uses: sonarsource/sonarcloud-github-action@master
+        with:
+          args: >-
+            -Dsonar.organization=HugoX2003
+            -Dsonar.projectKey=HugoX2003_aw-devops-platform
+
+      # Paso 4: Subir DB Password a SSM Parameter Store
+      - name: Store DB Password in SSM
+        run: |
+          aws ssm put-parameter --name /aw/bootcamp/db/password --value "supersecret" --type SecureString
+
+      # Paso 5: Recuperar el parámetro DB Password desde SSM
+      - name: Retrieve DB password from SSM
+        run: |
+          aws ssm get-parameter --name /aw/bootcamp/db/password --with-decryption --query "Parameter.Value" --output text
