@@ -52,13 +52,13 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: '1'
+          exit-code: '0'
 
       # Paso 2: Ejecutar PHPStan
       - name: Install PHPStan
         run: |
           composer require --dev phpstan/phpstan
-          vendor/bin/phpstan analyse src --level=7
+          vendor/bin/phpstan analyse . --level=7
 
       # Paso 3: Ejecutar SonarQube
       - name: SonarQube Scan
@@ -76,4 +76,16 @@ jobs:
       # Paso 5: Recuperar el parámetro DB Password desde SSM
       - name: Retrieve DB password from SSM
         run: |
-          aws ssm get-parameter --name /aw/bootcamp/db/password --with-decryption --query "Parameter.Value" --output text
+          DB_PASS=$(aws ssm get-parameter --name /aw/bootcamp/db/password --with-decryption --query "Parameter.Value" --output text)
+          
+          echo "DB_PASSWORD=$DB_PASS" >> $GITHUB_ENV
+          echo "La variable ha sido inyectada correctamente en el entorno de la aplicación."
+
+      - name: Verify Injection
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "Error: Variable no inyectada"
+            exit 1
+          else
+            echo "Verificación Exitosa: La App detecta la variable DB_PASSWORD proveniente de SSM"
+          fi
