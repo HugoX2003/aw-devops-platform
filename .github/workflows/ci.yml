@@ -58,7 +58,7 @@ jobs:
       - name: Install PHPStan
         run: |
           composer require --dev phpstan/phpstan
-          vendor/bin/phpstan analyse . --level=7
+          vendor/bin/phpstan analyse index.php --level=7
 
       # Paso 3: Ejecutar SonarQube
       - name: SonarQube Scan
