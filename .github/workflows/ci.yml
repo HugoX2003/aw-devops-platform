@@ -59,6 +59,7 @@ jobs:
         run: |
           composer require --dev phpstan/phpstan
           vendor/bin/phpstan analyse index.php --level=7
+        working-directory: app
 
       # Paso 3: Ejecutar SonarQube
       - name: SonarQube Scan
