@@ -66,8 +66,8 @@ jobs:
         uses: sonarsource/sonarcloud-github-action@master
         with:
           args: >-
-            -Dsonar.organization=HugoX2003
-            -Dsonar.projectKey=HugoX2003_aw-devops-platform
+            -Dsonar.organization=hugox2003
+            -Dsonar.projectKey=hugox2003_aw-devops-platform
             -Dsonar.exclusions=vendor/**,infra/**
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
