@@ -68,6 +68,9 @@ jobs:
           args: >-
             -Dsonar.organization=HugoX2003
             -Dsonar.projectKey=HugoX2003_aw-devops-platform
+            -Dsonar.exclusions=vendor/**,infra/**
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       # Paso 4: Subir DB Password a SSM Parameter Store
       - name: Store DB Password in SSM
