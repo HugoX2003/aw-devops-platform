@@ -42,6 +42,7 @@ jobs:
           aws-region: us-east-1
           role-to-assume: ${{ steps.tfout.outputs.CI_ROLE_ARN }}
           role-session-name: aw-bootcamp-ci-session
+          role-skip-session-tagging: true
 
       # 5) Subir artifact al bucket usando el rol asumido
       - name: Upload artifact to S3
