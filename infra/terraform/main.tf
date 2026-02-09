@@ -46,6 +46,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts_lifecycle" {
   rule {
     id     = "expire-30-days"
     status = "Enabled"
+    
+    filter {}
 
     expiration {
       days = 30
@@ -70,13 +72,13 @@ data "aws_iam_policy_document" "ci_assume" {
 }
 
 resource "aws_iam_role" "ci_role" {
-  name               = "aw-bootcamp-ci-role"
+  name               = "aw-bootcamp-ci-role-${random_id.bucket_id.hex}"
   assume_role_policy = data.aws_iam_policy_document.ci_assume.json
 }
 
 # Least-privilege permissions for artifacts bucket
 resource "aws_iam_policy" "ci_policy" {
-  name = "aw-bootcamp-ci-policy"
+  name = "aw-bootcamp-ci-policy-${random_id.bucket_id.hex}"
 
   policy = jsonencode({
     Version = "2012-10-17",
