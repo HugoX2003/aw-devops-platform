@@ -25,7 +25,7 @@ jobs:
 
       - name: Create EKS cluster
         run: |
-          eksctl create cluster --name dev-challenge \
+          eksctl create cluster --name dev-challenge-hugo \
             --region us-east-1 \
             --node-type t3.small \
             --nodes 2
