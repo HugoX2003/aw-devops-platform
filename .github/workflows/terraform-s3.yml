@@ -41,3 +41,9 @@ jobs:
         run: terraform apply -auto-approve tfplan
         env:
           TF_VAR_bucket_name: ${{ github.event.inputs.bucket_name }}
+
+      - name: Terraform Destroy
+        working-directory: infra/terraform/day8-s3
+        run: terraform destroy -auto-approve
+        env:
+          TF_VAR_bucket_name: ${{ github.event.inputs.bucket_name }}
