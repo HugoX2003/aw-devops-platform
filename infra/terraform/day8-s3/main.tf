@@ -1,16 +1,11 @@
 terraform {
     required_providers {
         aws = { source = "hashicorp/aws", version = "~> 5.50" }
-        kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.28" }
     }
 }
 
 provider "aws" {
     region = var.region
-}
-
-provider "kubernetes" {
-    config_path = "~/.kube/config"
 }
 
 resource "aws_kms_key" "s3_enc" {
@@ -45,17 +40,6 @@ resource "aws_s3_bucket_public_access_block" "block" {
     block_public_policy = true
     ignore_public_acls = true
     restrict_public_buckets = true
-}
-
-resource "kubernetes_config_map" "kms_info" {
-    metadata { 
-        name = "kms-config"
-        namespace = "default" 
-    }
-
-    data = {
-        KMS_KEY_ID = aws_kms_key.s3_enc.id
-    }
 }
 
 output "bucket_name" { value = aws_s3_bucket.files.id }
