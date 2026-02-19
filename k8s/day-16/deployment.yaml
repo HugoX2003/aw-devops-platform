@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
         - name: app
-          image: ghcr.io/HugoX2003/py-hello:latest
+          image: ghcr.io/hugox2003/py-hello:latest
           ports:
             - containerPort: 8080
