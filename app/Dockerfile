@@ -1,9 +1,10 @@
-FROM php:8.1-apache
-WORKDIR /var/www/html
+FROM python:3.12-slim
 
-RUN docker-php-ext-install pdo pdo_mysql \
-    && a2enmod rewrite
+RUN pip install fastapi uvicorn
 
-COPY . /var/www/html/
+WORKDIR /app
+COPY app/ /app/
 
-EXPOSE 80
+EXPOSE 8080
+
+CMD ["uvicorn", "main:app", "--host","0.0.0.0","--port","8080"]

@@ -1,0 +1,29 @@
+name: Build & Push FastAPI Image
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/py-hello:latest
+          docker build -t $IMAGE .
+          docker push $IMAGE

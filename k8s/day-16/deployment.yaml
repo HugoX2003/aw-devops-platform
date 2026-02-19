@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: py-hello
+  labels:
+    app: py-hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: py-hello
+  template:
+    metadata:
+      labels:
+        app: py-hello
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/HugoX2003/py-hello:latest
+          ports:
+            - containerPort: 8080
