@@ -24,6 +24,7 @@ jobs:
 
       - name: Build & Push
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/py-hello:latest
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE=ghcr.io/$OWNER/py-hello:latest
           docker build -t $IMAGE .
           docker push $IMAGE
