@@ -3,7 +3,7 @@ FROM python:3.12-slim
 RUN pip install fastapi uvicorn
 
 WORKDIR /app
-COPY app/ /app/
+COPY . /app/
 
 EXPOSE 8080
 
