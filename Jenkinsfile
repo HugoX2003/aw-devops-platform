@@ -2,15 +2,13 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION = "us-east-1"
+    AWS_REGION   = "us-east-1"
     CLUSTER_NAME = "dev-challenge-hugo"
   }
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
     stage('Verify tools') {
@@ -19,12 +17,11 @@ pipeline {
           set -e
           aws --version
           kubectl version --client=true
-          eksctl version
         '''
       }
     }
 
-    stage('Create EKS cluster (eksctl)') {
+    stage('Configure kubeconfig') {
       steps {
         withCredentials([
           string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
@@ -33,42 +30,78 @@ pipeline {
           sh '''
             set -e
             export AWS_DEFAULT_REGION="${AWS_REGION}"
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
 
-            eksctl create cluster \
-              --name "${CLUSTER_NAME}" \
-              --region "${AWS_REGION}" \
-              --node-type t3.small \
-              --nodes 2
-          '''
-        }
-      }
-    }
-
-    stage('Configure kubeconfig + verify nodes') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
-          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
-        ]) {
-          sh '''
-            set -e
-            export AWS_DEFAULT_REGION="${AWS_REGION}"
-
-            aws eks --region "${AWS_REGION}" update-kubeconfig --name "${CLUSTER_NAME}"
+            aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --kubeconfig "$KUBECONFIG"
             kubectl get nodes -o wide
           '''
         }
       }
     }
 
-    stage('Smoke test (nginx pod)') {
+    stage('Apply Deployment') {
       steps {
-        sh '''
-          set -e
-          kubectl run test-nginx --image=nginx --restart=Never --port 80
-          kubectl get pods -o wide
-          kubectl delete pod test-nginx
-        '''
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+            kubectl apply -f k8s/day2/nginx-deployment.yaml
+            kubectl get pods -l app=nginx -o wide
+            kubectl get deployment nginx-deployment
+          '''
+        }
+      }
+    }
+
+    stage('Apply Service (LoadBalancer) + wait EXTERNAL') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+            kubectl apply -f k8s/day2/nginx-service.yaml
+
+            # Esperar a que EXTERNAL-IP deje de ser <pending> y aparezca hostname/IP
+            for i in $(seq 1 60); do
+              EXT=$(kubectl get svc nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+              if [ -n "$EXT" ]; then
+                echo "EXTERNAL HOSTNAME: $EXT"
+                break
+              fi
+              echo "Esperando LB... ($i/60)"
+              sleep 10
+            done
+
+            kubectl get svc nginx-service -o wide
+            kubectl describe svc nginx-service
+          '''
+        }
+      }
+    }
+
+    stage('Test external access (curl)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+            EXT=$(kubectl get svc nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            echo "Probando http://$EXT"
+            curl -sS "http://$EXT" | head
+          '''
+        }
       }
     }
   }
