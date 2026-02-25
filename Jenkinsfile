@@ -49,7 +49,7 @@ pipeline {
             set -e
             export KUBECONFIG="$WORKSPACE/kubeconfig"
 
-            kubectl apply -f k8s/day2/nginx-deployment.yaml
+            kubectl apply -f k8s/day-10/nginx-deployment.yaml
             kubectl get pods -l app=nginx -o wide
             kubectl get deployment nginx-deployment
           '''
@@ -67,7 +67,7 @@ pipeline {
             set -e
             export KUBECONFIG="$WORKSPACE/kubeconfig"
 
-            kubectl apply -f k8s/day2/nginx-service.yaml
+            kubectl apply -f k8s/day-10/nginx-service.yaml
 
             # Esperar a que EXTERNAL-IP deje de ser <pending> y aparezca hostname/IP
             for i in $(seq 1 60); do
