@@ -77,35 +77,39 @@ pipeline {
           string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
           string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
         ]) {
-          sh '''
-            set -e
-            set -o pipefail
+          sh(label: 'Verify (bash)', script: '''#!/usr/bin/env bash
+            set -euo pipefail
+
             export KUBECONFIG="$HOME/.kube/config"
 
+            # 1) Verificar rollout y recursos
             kubectl rollout status deployment/tf-nginx-deployment --timeout=180s
             kubectl get pods -l app=tf-nginx -o wide
             kubectl get svc tf-nginx-service -o wide
 
-            # esperar hostname del LB
-            for i in $(seq 1 60); do
-              EXT=$(kubectl get svc tf-nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-              if [ -n "$EXT" ]; then
-                echo "LB_HOSTNAME=$EXT"
-                break
-              fi
-              echo "Esperando LoadBalancer... ($i/60)"
-              sleep 10
-            done
+            # 2) Obtener hostname del LoadBalancer
+            EXT=$(kubectl get svc tf-nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -z "$EXT" ]; then
+              echo "ERROR: No se encontró hostname del LoadBalancer en tf-nginx-service."
+              kubectl describe svc tf-nginx-service || true
+              exit 1
+            fi
 
-            # esperar DNS
+            echo "LB_HOSTNAME=$EXT"
+            echo "Probando http://$EXT"
+
+            # 3) Esperar propagación DNS
             for i in $(seq 1 30); do
-              getent hosts "$EXT" && break
-              echo "Esperando DNS... ($i/30)"
-              sleep 10
+                if getent hosts "$EXT" >/dev/null 2>&1; then
+                    break
+                fi
+                echo "Esperando DNS... ($i/30)"
+                sleep 10
             done
 
+            # 4) Curl de verificación (debe devolver HTML de Nginx)
             curl -sS "http://$EXT" | head -n 20
-          '''
+            ''')
         }
       }
     }
