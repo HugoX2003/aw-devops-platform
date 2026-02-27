@@ -1,0 +1,62 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION   = "us-east-1"
+    CLUSTER_NAME = "dev-challenge-hugo"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          eksctl version
+        '''
+      }
+    }
+
+    stage('Delete EKS cluster (eksctl)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+            if eksctl get cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" >/dev/null 2>&1; then
+              echo "Deleting cluster ${CLUSTER_NAME}..."
+              eksctl delete cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}"
+            else
+              echo "Cluster ${CLUSTER_NAME} does not exist. Nothing to delete."
+            fi
+          '''
+        }
+      }
+    }
+
+    stage('Post-check') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+            echo "Remaining clusters in ${AWS_REGION}:"
+            aws eks list-clusters --region "${AWS_REGION}" --output table
+          '''
+        }
+      }
+    }
+  }
+}
