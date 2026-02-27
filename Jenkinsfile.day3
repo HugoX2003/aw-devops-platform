@@ -1,0 +1,113 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  environment {
+    AWS_REGION   = "us-east-1"
+    CLUSTER_NAME = "dev-challenge-hugo"
+    TF_DIR       = "infra/terraform/day3-k8s"
+  }
+
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          kubectl version --client=true
+          terraform version
+        '''
+      }
+    }
+
+    stage('Configure kubeconfig (~/.kube/config)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+            mkdir -p "$HOME/.kube"
+            aws eks update-kubeconfig \
+              --name "${CLUSTER_NAME}" \
+              --region "${AWS_REGION}" \
+              --kubeconfig "$HOME/.kube/config"
+
+            export KUBECONFIG="$HOME/.kube/config"
+            kubectl get nodes -o wide
+          '''
+        }
+      }
+    }
+
+    stage('Terraform init/plan/apply') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$HOME/.kube/config"
+            cd "${TF_DIR}"
+
+            terraform init
+            terraform plan
+            terraform apply -auto-approve
+
+            echo "Terraform outputs:"
+            terraform output || true
+          '''
+        }
+      }
+    }
+
+    stage('Verify (kubectl + external)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            set -o pipefail
+            export KUBECONFIG="$HOME/.kube/config"
+
+            kubectl rollout status deployment/tf-nginx-deployment --timeout=180s
+            kubectl get pods -l app=tf-nginx -o wide
+            kubectl get svc tf-nginx-service -o wide
+
+            # esperar hostname del LB
+            for i in $(seq 1 60); do
+              EXT=$(kubectl get svc tf-nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+              if [ -n "$EXT" ]; then
+                echo "LB_HOSTNAME=$EXT"
+                break
+              fi
+              echo "Esperando LoadBalancer... ($i/60)"
+              sleep 10
+            done
+
+            # esperar DNS
+            for i in $(seq 1 30); do
+              getent hosts "$EXT" && break
+              echo "Esperando DNS... ($i/30)"
+              sleep 10
+            done
+
+            curl -sS "http://$EXT" | head -n 20
+          '''
+        }
+      }
+    }
+  }
+}
