@@ -1,0 +1,71 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  environment {
+    AWS_REGION    = "us-east-1"
+    TF_DIR        = "infra/terraform/day5-eks-vpc"
+    EKS_TF_CLUSTER = "terraform-eks-cluster"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          kubectl version --client=true
+          terraform version
+        '''
+      }
+    }
+
+    stage('Terraform init/plan/apply (VPC + EKS)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'Terraform apply (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+cd "${TF_DIR}"
+
+terraform init
+terraform plan
+terraform apply -auto-approve
+
+terraform output || true
+''')
+        }
+      }
+    }
+
+    stage('Configure kubeconfig + verify nodes') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'Verify cluster (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+aws eks update-kubeconfig --name "${EKS_TF_CLUSTER}" --region "${AWS_REGION}" --kubeconfig "$KUBECONFIG"
+kubectl get nodes -o wide
+''')
+        }
+      }
+    }
+  }
+}
