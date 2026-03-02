@@ -1,0 +1,116 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  environment {
+    AWS_REGION   = "us-east-1"
+    CLUSTER_NAME = "dev-challenge-hugo"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          kubectl version --client=true
+          eksctl version
+        '''
+      }
+    }
+
+    stage('Configure kubeconfig') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+            aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --kubeconfig "$KUBECONFIG"
+            kubectl get nodes -o wide
+          '''
+        }
+      }
+    }
+
+    stage('Associate OIDC provider') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+            eksctl utils associate-iam-oidc-provider \
+              --cluster "${CLUSTER_NAME}" \
+              --region "${AWS_REGION}" \
+              --approve
+          '''
+        }
+      }
+    }
+
+    stage('Create IAM ServiceAccount (s3-reader)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh '''
+            set -e
+            export AWS_DEFAULT_REGION="${AWS_REGION}"
+            export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+            eksctl create iamserviceaccount \
+              --cluster "${CLUSTER_NAME}" \
+              --name s3-reader \
+              --namespace default \
+              --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
+              --approve \
+              --override-existing-serviceaccounts
+
+            kubectl get sa s3-reader -o yaml | sed -n '1,180p'
+          '''
+        }
+      }
+    }
+
+    stage('Test IRSA (sts + s3 ls)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'IRSA test (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+kubectl run irsa-test \
+  --image amazon/aws-cli:2.13.2 \
+  --restart=Never \
+  --serviceaccount=s3-reader \
+  --command -- sh -c "aws sts get-caller-identity && echo '---' && aws s3 ls"
+
+kubectl wait --for=condition=Succeeded pod/irsa-test --timeout=300s
+kubectl logs irsa-test
+''')
+        }
+      }
+    }
+  }
+}
