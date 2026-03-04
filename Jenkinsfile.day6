@@ -1,0 +1,159 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  environment {
+    AWS_REGION   = "us-east-1"
+    CLUSTER_NAME = "dev-challenge-hugo"
+    RELEASE_NAME = "webserver"
+  }
+
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          kubectl version --client=true
+          eksctl version
+          helm version
+        '''
+      }
+    }
+
+    stage('Configure kubeconfig') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'kubeconfig (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --kubeconfig "$KUBECONFIG"
+kubectl get nodes -o wide
+''')
+        }
+      }
+    }
+
+    stage('Helm repo add/update') {
+      steps {
+        sh(label: 'helm repo (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+''')
+      }
+    }
+
+    stage('Deploy Nginx with Helm (LoadBalancer)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'helm deploy (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+# idempotente: si ya existe, hace upgrade; si no, instala
+helm upgrade --install "${RELEASE_NAME}" bitnami/nginx \
+  --set service.type=LoadBalancer \
+  --set service.port=80
+
+helm ls
+kubectl get all -l app.kubernetes.io/instance="${RELEASE_NAME}"
+''')
+        }
+      }
+    }
+
+    stage('Get EXTERNAL + test (curl)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'test lb (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+# Esperar hostname del LB
+for i in $(seq 1 60); do
+  EXT=$(kubectl get svc -l app.kubernetes.io/instance="${RELEASE_NAME}" \
+    -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+  if [ -n "$EXT" ]; then
+    echo "LB_HOSTNAME=$EXT"
+    break
+  fi
+  echo "Esperando LoadBalancer... ($i/60)"
+  sleep 10
+done
+
+kubectl get svc -l app.kubernetes.io/instance="${RELEASE_NAME}" -o wide
+
+# Esperar DNS
+for i in $(seq 1 30); do
+  getent hosts "$EXT" >/dev/null 2>&1 && break
+  echo "Esperando DNS... ($i/30)"
+  sleep 10
+done
+
+curl -sS "http://$EXT" | head -n 20
+''')
+        }
+      }
+    }
+
+    stage('ConfigMap practice (nginx-index)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'configmap (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+cat > index.html <<'HTML'
+<h1>Hello from EKS!</h1>
+<p>This is a custom page.</p>
+HTML
+
+# idempotente
+kubectl create configmap nginx-index --from-file=index.html --dry-run=client -o yaml | kubectl apply -f -
+kubectl get configmap nginx-index -o yaml | sed -n '1,120p'
+''')
+        }
+      }
+    }
+
+    stage('Secret practice (db-creds)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'secret (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+kubectl create secret generic db-creds --from-literal=password=MySecretP@ss \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl get secret db-creds -o yaml | sed -n '1,120p'
+''')
+        }
+      }
+    }
+  }
+}
