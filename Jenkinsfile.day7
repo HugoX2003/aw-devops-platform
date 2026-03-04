@@ -1,0 +1,152 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  environment {
+    AWS_REGION    = "us-east-1"
+    CLUSTER_NAME  = "dev-challenge-hugo"
+    RELEASE_NAME  = "webserver"
+  }
+
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+
+    stage('Verify tools') {
+      steps {
+        sh '''
+          set -e
+          aws --version
+          kubectl version --client=true
+          eksctl version
+          helm version
+        '''
+      }
+    }
+
+    stage('Configure kubeconfig') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'kubeconfig (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --kubeconfig "$KUBECONFIG"
+kubectl get nodes -o wide
+''')
+        }
+      }
+    }
+
+    stage('Install/Verify Metrics Server') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'metrics-server (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+# El PDF sugiere instalar metrics-server desde el manifest oficial (apply -f URL)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s || true
+kubectl top nodes || true
+''')
+        }
+      }
+    }
+
+    stage('Create HPA (webserver Helm Deployment)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'hpa (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+DEPLOY=$(kubectl get deploy -l app.kubernetes.io/instance="${RELEASE_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$DEPLOY" ]; then
+  echo "No encontré Deployment para release=${RELEASE_NAME}. Revisa: kubectl get deploy -A"
+  exit 1
+fi
+echo "Deployment objetivo: $DEPLOY"
+
+# Para que HPA por CPU funcione bien, el workload debe tener requests de CPU.
+# Se fuerza vía helm upgrade (idempotente).
+helm upgrade "${RELEASE_NAME}" bitnami/nginx \
+  --reuse-values \
+  --set resources.requests.cpu=100m \
+  --set resources.requests.memory=128Mi
+
+# Crear HPA (ejemplo del PDF: cpu 50%, min 2, max 5)
+kubectl autoscale deployment "$DEPLOY" --cpu-percent=50 --min=2 --max=5
+
+kubectl get hpa
+kubectl describe hpa "$DEPLOY" || true
+''')
+        }
+      }
+    }
+
+    stage('Generate load (light) + observe HPA') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'load (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG="$WORKSPACE/kubeconfig"
+
+SVC=$(kubectl get svc -l app.kubernetes.io/instance="${RELEASE_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$SVC" ]; then
+  echo "No encontré Service para release=${RELEASE_NAME}."
+  exit 1
+fi
+echo "Service objetivo: $SVC"
+
+kubectl delete pod loadgen --ignore-not-found=true
+kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c "while true; do wget -q -O- http://$SVC >/dev/null; done" || true
+
+sleep 60
+kubectl get hpa -o wide || true
+kubectl get deploy -l app.kubernetes.io/instance="${RELEASE_NAME}" -o wide || true
+
+kubectl delete pod loadgen --ignore-not-found=true
+''')
+        }
+      }
+    }
+
+    stage('Enable EKS control-plane logging (CloudWatch)') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          sh(label: 'eks logging (bash)', script: '''#!/usr/bin/env bash
+set -euo pipefail
+export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+aws eks update-cluster-config --name "${CLUSTER_NAME}" --region "${AWS_REGION}" \
+  --logging '{"clusterLogging":[{"types":["api","scheduler","controllerManager"],"enabled":true}]}'
+
+aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" \
+  --query "cluster.logging.clusterLogging" --output table
+''')
+        }
+      }
+    }
+  }
+}
