@@ -55,10 +55,16 @@ kubectl get nodes -o wide
 set -euo pipefail
 export KUBECONFIG="$WORKSPACE/kubeconfig"
 
-# El PDF sugiere instalar metrics-server desde el manifest oficial (apply -f URL)
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# Si ya existe, NO aplicar manifest (evita conflicto con selector inmutable)
+if kubectl -n kube-system get deploy metrics-server >/dev/null 2>&1; then
+  echo "metrics-server ya existe (addon / instalado). Solo verificando..."
+else
+  echo "metrics-server no existe. Instalando manifest oficial..."
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+fi
 
 kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s || true
+kubectl get apiservice v1beta1.metrics.k8s.io -o wide || true
 kubectl top nodes || true
 ''')
         }
